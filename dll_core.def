@@ -1,0 +1,12 @@
+EXPORTS
+    Adddbl @1
+    Addint @2
+    Divdbl @3
+    Divint @4
+    Hello @5
+    Multdbl @6
+    Multint @7
+    Squardbl @8
+    Squarint @9
+    Subdbl @10
+    Subint @11

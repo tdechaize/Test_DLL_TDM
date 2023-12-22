@@ -1,0 +1,1171 @@
+					 Bilan concernant la construction et les tests d'une DLL 
+			avec le compilateur GCC 13.2.0 inclus dans Winlibs sur Windows 11 64 bits.
+	 
+Tout d'abord rappelons l'installation préalable de cet environnement de développement qui correspond à un 
+portage sous Windows de beaucoup d'outils de développements présents sous Unix (dont le compilateur GCC), 
+ainsi que du portage d'une foultitude d'outils, de programmes, de librairies, et d'utilitaires, certains 
+très répandus, d'autres qui ne sont pas encore disponibles, comme l'outil "gendef" par exemple.
+
+Les fichiers d'installation sont des exécutables Windows à télécharger sur le site : 
+		https://jmeubank.github.io/tdm-gcc/download/
+
+Il faut donc télécharger les fichiers suivants (les noms dépendent des versions qui sont évolutives) :
+	tdm64-gcc-10.3.0-2.exe (je récupère ainsi GCC version 10.3.0 en 64 bits et son environnement)
+	tdm-gcc-10.3.0-2.exe (je récupère ainsi GCC version 10.3.0 en 32 bits et son environnement)
+
+Je choisis les répertoires d'installation standards proposés : "C:\TDM-GCC-32" et "C:\TDM-GCC-64".
+
+En préambule, j'ai aussi consulté sur Internet quelques bons tutos sur la construction de DLL et leurs utilisations.
+
+Voici une liste non exhaustive de ces recherches :
+	a) sur le site "developpez.com" (https://www.developpez.com/), un trés bon tutoriel expliquant les deux
+		modes d'usage d'une DLL : le mode explicite avec des fonctions Windows et le mode implicite (présence
+		de la DLL dans le PATH) : https://melem.developpez.com/tutoriels/api-windows/bibliotheques-dynamiques-dlls/
+	b) un excellent article de Mark Payne sur la construction d'une DLL, versionnée ou non, et avec ressources :
+		https://www.transmissionzero.co.uk/computing/building-dlls-with-mingw/
+		Avec cet exemple, la présence d'un fichier d'include avec l'astuce de tester la présence d'une "variable define" 
+		lors des compilations permettant de préfixer les functions par "__declspec(dllexport)" pour la génération de la DLL,
+		et par le préfixage par "__declspec(dllimport)" lors de l'utilisation de la DLL, me semblait fortement souhaité.
+	b) l'exemple de Chris Wellons "How to build and use DLLs on Windows" (très instructif)
+				https://nullprogram.com/blog/2021/05/31/
+	d) Pour les débutants : https://www.codeguru.com/cplusplus/dll-tutorial-for-beginners/
+
+En dernier, je trouve un article qui mêle des tests de DLL, en lui mixant des appels de fonctions en C, mais aussi 
+en C++, avec notament l'usage d'une classe C++, ce qui me parait être un test plus qu'intéressant :
+				https://web.archive.org/web/20190327134856/http://www.mingw.org/wiki/sampledll 
+
+L'exemple montre la génération d'une DLL et son usage avec un programme de test dont voici les sources :
+
+"example_dll.cpp" :
+
+//   *****************************          File : example_dll.cpp (source core of dll)       **********************************
+#include <stdio.h>
+#include "example_dll.h"
+
+__stdcall void hello(const char *s)
+{
+        printf("Hello %s\n", s);
+}
+int Double(int x)
+{
+        return 2 * x;
+}
+void CppFunc(void)
+{
+        puts("CppFunc");
+}
+void MyClass::func(void)
+{
+        puts("MyClass.func()");
+}
+//   *****************************                 End file : example_dll.cpp            **********************************
+
+"example_dll.h" :
+
+//   *****************************        File : example_dll.h (source include of dll)       **********************************
+#ifndef EXAMPLE_DLL_H
+#define EXAMPLE_DLL_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#ifdef BUILDING_EXAMPLE_DLL
+#define EXAMPLE_DLL __declspec(dllexport)
+#else
+#define EXAMPLE_DLL __declspec(dllimport)
+#endif
+
+void __stdcall EXAMPLE_DLL hello(const char *s);
+
+int EXAMPLE_DLL Double(int x);
+
+#ifdef __cplusplus
+}
+#endif
+
+// NOTE: this function is not declared extern "C"
+void EXAMPLE_DLL CppFunc(void);
+
+// NOTE: this class must not be declared extern "C"
+class EXAMPLE_DLL MyClass
+{
+public:
+        MyClass() {};
+        virtual ~MyClass() {};
+        void func(void);
+};
+
+#endif  // EXAMPLE_DLL_H
+//   *****************************               End file : example_dll.h             **********************************
+
+"example_exe.cpp" :
+
+//   *****************************        File : example_exe.cpp (program test of dll)       **********************************
+#include <stdio.h>
+#include "example_dll.h"
+
+int main(void)
+{
+        hello("World");
+        printf("%d\n", Double(333));
+        CppFunc();
+
+        MyClass a;
+        a.func();
+
+        return 0;
+}
+//   *******************************                 End file : example_exe.cpp              **********************************
+
+Pour la generation de cette DLL et de son programme de test, je me créé deux "petits" scripts, le premier afin de générer 
+la version 32 bits et le deuxième pour la version 64 bits :
+
+"Compile_link_dll_32bits.bat" :
+
+@echo off
+REM 	Save of initial PATH on PATHINIT variable
+set PATHINIT=%PATH%
+REM      Mandatory, add to PATH the binary directory of compiler Digital Mars (You can adapt this directory at your personal software environment)
+set PATH=C:\TDM-GCC-32\bin;%PATH%
+g++ -c -DBUILDING_EXAMPLE_DLL example_dll.cpp
+g++ -shared -o example_dll.dll example_dll.o -Wl,--out-implib,libexample_dll.a
+g++ -c example_exe.cpp
+g++ -o example_exe.exe example_exe.o -L. -lexample_dll
+example_exe.exe
+set PATH=%PATHINIT%
+
+"Compile_link_dll_64bits.bat" :
+
+@echo off
+REM 	Save of initial PATH on PATHINIT variable
+set PATHINIT=%PATH%
+REM      Mandatory, add to PATH the binary directory of compiler Digital Mars (You can adapt this directory at your personal software environment)
+set PATH=C:\TDM-GCC-64\bin;%PATH%
+g++ -c -DBUILDING_EXAMPLE_DLL example_dll.cpp -o example_dll64.o
+g++ -shared -o example_dll64.dll example_dll64.o -Wl,--out-implib,libexample_dll64.a
+g++ -c example_exe.cpp -o example_exe64.o
+g++ -o example_exe64.exe example_exe64.o -L. -lexample_dll64
+example_exe64.exe
+set PATH=%PATHINIT%
+
+L'exécution de ces deux programmes donnent les résultats suivants :
+
+"Compile_link_dll_32bits.bat"
+Hello World
+666
+CppFunc
+MyClass.func()
+
+"Compile_link_dll_64bits.bat"
+Hello World
+666
+CppFunc
+MyClass.func()
+
+Aucune difficulté rencontrée lors de ce premier test qui illustre pas mal de fonctionnalités : appel de finctions 
+définies dans une DLL, soit en mode d'appel "__cdecl" (par défaut avec GCC en 32 bits), soit en mode d'appel "__stdcall",
+mais aussi appel de fonctions C++, soit en direct, soit reprise dans une classe C++.
+
+
+Fort de ce premier test concluant, je décide ici d'aller directement au but final recherché, en réutilisant
+tous les sources qui m'ont servis à un test conclusif avec l'environnement MSYS2/MINGW qui ressemble à s'y méprendre
+à celui de TDM.
+
+Voici donc les principaux fichiers qui vont servir à la construction at aux test de notre DLL :
+
+"dll_core.c"        (fichier principal de la DLL, j'ai mis tous ces sources sous le répertoire \src)  :
+
+//*********************    File : dll_core.c (main core of dll)    *****************
+// #define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <stdio.h>
+#include "src\dll_share.h"
+
+/*------------------------------------------------------------------------
+ Procedure:     DllMain
+ Purpose:       Dll entry point. Called when a dll is loaded or
+                unloaded by a process, and when new threads are
+                created or destroyed.
+ Input:         hinstDLL : 		instance handle of the dll
+                fdwReason : 	event: attach/detach
+                lpvReserved : 	not used
+ Output:        The return value is used only when the fdwReason is
+                DLL_PROCESS_ATTACH. True means that the dll has
+                sucesfully loaded, False means that the dll is unable
+                to initialize and should be unloaded immediately.
+ Errors:
+------------------------------------------------------------------------*/
+
+//extern "C" BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD Reason, LPVOID LPV) {
+//This one was only necessary if you were using a C++ compiler
+
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) 
+{
+    switch( fdwReason) {
+    case DLL_PROCESS_ATTACH:
+        printf( "DLL attaching to process...\n" );
+        break;
+    case DLL_PROCESS_DETACH:
+        printf( "DLL detaching from process...\n" );
+        break;
+		// The attached process creates a new thread.
+	case DLL_THREAD_ATTACH:
+		printf("The attached process creating a new thread...\n");
+		break;
+		// The thread of the attached process terminates.
+	case DLL_THREAD_DETACH:
+		printf("The thread of the attached process terminates...\n");
+		break;
+	default:
+		printf("Reason called not matched, error if any : %ld...\n", GetLastError());
+		break;
+    }
+    return( 1 );    /* Indicate success */
+}
+
+/*------------------------------------------------------------------------
+
+ Another instructions : 		list of exported functions of DLL. 
+ 
+ All functions must be declared in dll_share.h, but instancied here
+ with body described all instructions to execute "really" that for 
+ which each function is defined. Noted prefix FUNCAPI valued at :
+		__declspec(dllexport) when generate DLL
+		__declspec(dllimport) when use DLL
+ 
+------------------------------------------------------------------------*/
+
+FUNCAPI int Hello()
+ {
+    printf( "Hello from a DLL!\n" );
+    return( 0 );
+ }
+
+FUNCAPI int Addint(int i1, int i2)
+ {
+	return i1 + i2;
+ }
+ 
+FUNCAPI int Subint(int i1, int i2)
+ {
+	return i1 - i2;
+ }
+
+FUNCAPI int Multint(int i1, int i2)
+ { 
+   return i1 * i2;
+ }
+ 
+FUNCAPI int Divint(int i1, int i2) 
+ {
+  if (i2 == 0) { 
+     printf("La division par zero n'est pas autorisee, le retour vaut 1 par défaut.\n");
+     return(1);
+  } else { 
+	  return (i1/i2);
+  }
+ }
+ 
+FUNCAPI int Squarint(int i)
+ { 
+   return i * i;
+ }
+
+FUNCAPI double Adddbl(double i1, double i2)
+ {
+	return i1 + i2;
+ }
+ 
+FUNCAPI double Subdbl(double i1, double i2)
+ {
+	return i1 - i2;
+ }
+
+FUNCAPI double Multdbl(double i1, double i2)
+ { 
+   return i1 * i2;
+ }
+ 
+FUNCAPI double Divdbl(double i1, double i2) 
+ {
+  if (i2 == 0.0) { 
+     printf("La division par zero n'est pas autorisee, le retour vaut 1 par défaut.\n");
+     return(1.0);
+  } else   {
+	  return (i1/i2);
+  }
+ }
+
+FUNCAPI double Squardbl(double i)
+ { 
+   return i * i;
+ }
+//******************************    End file : dll_core.c   *********************************
+
+"dll_share.h" (fichier d'include pouvant servir aussi bien à la génération comme à l'utilisation de la DLL) :
+
+//**********************  File : dll_share.h (include file shared beetween build or use DLL)  ****************
+#ifndef DLLCODE_H
+#define DLLCODE_H
+
+/* Test Windows platform */
+
+#if defined(__NT__) || defined(_WIN32) || defined(_Windows) // __NT__ with OpenWatcom, _WIN32 with GCC, MSVC, clang, Pelles C, lcc (?) _Windows with Borland C/C++ defined Windows Platforms
+
+  /* You should define BUILD_DLL *only* when building the DLL. */
+  
+  #ifdef BUILD_DLL
+    #define FUNCAPI  __declspec(dllexport)
+  #else
+    #define FUNCAPI  __declspec(dllimport)
+  #endif
+
+  /* Define calling convention in one place, for convenience. */
+  #if defined(__LCC__) // || defined(__WATCOMC__)
+    #define  _stdcall
+  #elif defined (__BORLANDC__) || defined(__POCC__)
+    #define FUNCALL __stdcall
+  #else	
+    #define FUNCALL __cdecl
+  # endif
+
+#elif defined(_linux) || defined(UNIX)
+
+	#if defined(BUILD_DLL) && defined(HAS_GCC_VISIBILITY)
+	#   define FUNCAPI  _attribute_  _((visibility("default")))
+	#endif
+
+#else /* __NT__ or _WIN32 or _Windows or _Linux not defined. */
+
+  /* Define with no value on non-Windows OSes. */
+  #define FUNCAPI
+  #define FUNCALL
+
+#endif
+
+/* if used by C++ code, identify these functions as C items */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/*------------------------------------------------------------------------
+
+ Another instructions : 		declarations of exported functions of DLL. 
+ 
+ All functions must be declared here, but instancied in file dll_core.c. 
+ Noted prefix FUNCAPI valued at :
+		__declspec(dllexport) when generate DLL (define BUILD_DLL)
+		__declspec(dllimport) when use DLL (not define BUILD_DLL)
+ 
+------------------------------------------------------------------------*/
+
+FUNCAPI int Hello();
+FUNCAPI int Addint(int i1, int i2);
+FUNCAPI int Subint(int i1, int i2);
+FUNCAPI int Multint(int i1, int i2);
+FUNCAPI int Divint(int i1, int i2);
+FUNCAPI int Squarint(int i);
+FUNCAPI double Adddbl(double i1, double i2);
+FUNCAPI double Subdbl(double i1, double i2);
+FUNCAPI double Multdbl(double i1, double i2);
+FUNCAPI double Divdbl(double i1, double i2);
+FUNCAPI double Squardbl(double i);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+//*****************************          End file : dll_share.h           *****************************
+
+"testdll_implicit.c" (le fichier source du programme de test de la DLL en mode implicite)
+
+//*********************  File : testdll_implicit.c (program main test of dll, with load implicit)  *****************
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include "src\dll_share.h"
+
+int main(int argc, char** argv)
+{
+  int a = 42;
+  int b = 7;
+  int result = 0;
+  double a1 = 16.9;
+  double b1 = 7.3;
+  double result1 = 0.0;
+  
+  Hello();
+  printf("----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------\n");
+  result = Addint(a, b);
+  printf("Le resultat de l'addition de %i plus %i vaut : %i. \t (from application with implicit load of DLL %s)\n", a,b,result,argv[0]);
+  result = Subint(a, b);
+  printf("Le resultat de la soustraction de %i moins %i vaut : %i.  (from application with implicit load of DLL %s)\n", a,b,result,argv[0]);
+  result = Multint(a, b);
+  printf("Le resultat de la multiplication de %i par %i vaut : %i. (from application with implicit load of DLL %s)\n", a,b,result,argv[0]);
+  result = Divint(a, b);
+  printf("Le resultat de la division de %i par %i vaut : %i.         (from application with implicit load of DLL %s)\n", a,b,result,argv[0]);
+  result = Squarint(b);
+  printf("Le carre de %i par %i vaut : %i. \t\t\t\t (from application with implicit load of DLL %s)\n", b,b,result,argv[0]);
+  printf("----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------\n");
+  result1 = Adddbl(a1, b1);
+  printf("La somme de %.1f plus %.1f vaut %.2f. \t       (from application with implicit load of DLL %s)\n", a1,b1,result1,argv[0]);
+  result1 = Subdbl(a1, b1);
+  printf("La soustraction de %.1f moins %.1f vaut %.2f.   (from application with implicit load of DLL %s)\n", a1,b1,result1,argv[0]);
+  result1 = Multdbl(a1, b1);
+  printf("La multiplication de %.1f par %.1f vaut %.2f. (from application with implicit load of DLL %s)\n", a1,b1,result1,argv[0]);
+  result1 = Divdbl(a1, b1);
+  printf("La division de %.1f par %.1f vaut %.3f.        (from application with implicit load of DLL %s)\n", a1,b1,result1,argv[0]);
+  result1 = Squardbl(b1);
+  printf("Le carre de %.1f par %.1f vaut %.2f. \t       (from application with implicit load of DLL %s)\n", b1,b1,result1,argv[0]);	
+
+  return EXIT_SUCCESS;
+}
+// ****************************************   End file : testdll_implicit.c   *******************************************
+
+"testdll_explicit.c"   (source du programme de test de la DLL en mode console, avec chargement explicite)
+
+//*********************  File : testdll_explicit.c (program main test of dll, with load explicit)  *****************
+#include <stdio.h>
+#include <windows.h>
+// #include "dll_share.h"
+ 
+typedef int (*HelloFunc)();
+typedef int (*AddFuncint)(int,int);
+typedef int (*SubFuncint)(int,int);
+typedef int (*MulFuncint)(int,int);
+typedef int (*DivFuncint)(int,int);
+typedef int (*SquarFuncint)(int);
+typedef double (*AddFuncdbl)(double,double);
+typedef double (*SubFuncdbl)(double,double);
+typedef double (*MulFuncdbl)(double,double);
+typedef double (*DivFuncdbl)(double,double);
+typedef double (*SquarFuncdbl)(double);
+
+
+int main( int argc, char *argv[ ] )
+{
+	int a = 42;
+	int b = 7;
+	int result=0;
+	double a1 = 16.9;
+	double b1 = 7.3;
+	double result1 = 0.0;
+
+#if __x86_64__
+	HINSTANCE hLib = LoadLibrary("dll_core64.dll");
+#else
+	HINSTANCE hLib = LoadLibrary("dll_core.dll");
+#endif
+	
+	if (hLib != NULL) {
+
+		HelloFunc af0 = (HelloFunc)GetProcAddress(hLib, "Hello");	
+		AddFuncint af1 = (AddFuncint)GetProcAddress(hLib, "Addint");
+		SubFuncint af2 = (SubFuncint)GetProcAddress(hLib, "Subint");	
+		MulFuncint af3 = (MulFuncint)GetProcAddress(hLib, "Multint");
+		DivFuncint af4 = (DivFuncint)GetProcAddress(hLib, "Divint");
+		SquarFuncint af5 = (SquarFuncint)GetProcAddress(hLib, "Squarint");
+		AddFuncdbl af6 = (AddFuncdbl)GetProcAddress(hLib, "Adddbl");
+		SubFuncdbl af7 = (SubFuncdbl)GetProcAddress(hLib, "Subdbl");	
+		MulFuncdbl af8 = (MulFuncdbl)GetProcAddress(hLib, "Multdbl");
+		DivFuncdbl af9 = (DivFuncdbl)GetProcAddress(hLib, "Divdbl");
+		SquarFuncdbl af10 = (SquarFuncdbl)GetProcAddress(hLib, "Squardbl");
+	
+		(*af0)();
+		printf("----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------\n");		
+		result = (*af1)(a, b);
+		printf("La somme de %i plus %i vaut %i. \t\t(from application with explicit load of DLL %s)\n", a,b,result,argv[0]);
+		result = (*af2)(a, b);
+		printf("La soustraction de %i moins %i vaut %i.  (from application with explicit load of DLL %s)\n", a,b,result,argv[0]);
+		result = (*af3)(a, b);
+		printf("La multiplication de %i par %i vaut %i. (from application with explicit load of DLL %s)\n", a,b,result,argv[0]);
+		result = (*af4)(a, b);
+		printf("La division de %i par %i vaut %i.         (from application with explicit load of DLL %s)\n", a,b,result,argv[0]);
+		result = (*af5)(b);
+		printf("Le carre de %i par %i vaut %i.\t\t(from application with explicit load of DLL %s)\n", b,b,result,argv[0]);
+		printf("----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------\n");	
+		result1 = (*af6)(a1, b1);
+		printf("La somme de %.1f plus %.1f vaut %.2f. \t       (from application with explicit load of DLL %s)\n", a1,b1,result1,argv[0]);
+		result1 = (*af7)(a1, b1);
+		printf("La soustraction de %.1f moins %.1f vaut %.2f.   (from application with explicit load of DLL %s)\n", a1,b1,result1,argv[0]);
+		result1 = (*af8)(a1, b1);
+		printf("La multiplication de %.1f par %.1f vaut %.2f. (from application with explicit load of DLL %s)\n", a1,b1,result1,argv[0]);
+		result1 = (*af9)(a1, b1);
+		printf("La division de %.1f par %.1f vaut %.3f.        (from application with explicit load of DLL %s)\n", a1,b1,result1,argv[0]);
+		result1 = (*af10)(b1);
+		printf("Le carre de %.1f par %.1f vaut %.2f. \t       (from application with explicit load of DLL %s)\n", b1,b1,result1,argv[0]);	
+		
+		FreeLibrary(hLib);
+		
+	} else { 	
+		printf("Unable to load the specified DLL : dll_core.dll.");
+	}
+	
+	return EXIT_SUCCESS;
+}
+// **************************************     End file : testdll_explicit.c     *******************************************
+
+compile_link_dll_TDM_GCC_OK.bat  (le nouveau script de génération de la DLL et des deux programmes de tests : implicite et explicite)
+
+@echo off
+REM
+REM   	Script de génération de la DLL dll_core.dll et des programmee de test : "testdll_implicit.exe" (chargement implicite de la DLL),
+REM 	"testdll_explicit.exe" (chargement explicite de la DLL), et enfin du script de test écrit en python.
+REM		Ce fichier de commande est paramètrable avec deux paraamètres : 
+REM			a) le premier paramètre permet de choisir la compilation et le linkage des programmes en une seule passe
+REM 			soit la compilation et le linkage en deux passes successives : compilation séparée puis linkage,
+REM 		b) le deuxième paramètre définit soit une compilation et un linkage en mode 32 bits, soit en mode 64 bits
+REM 	 		pour les compilateurs qui le supportent.
+REM     Le premier paramètre peut prendre les valeurs suivantes :
+REM 		ONE (or unknown value, because only second value of this parameter is tested during execution) ou TWO.
+REM     Et le deuxième paramètre peut prendre les valeurs suivantes :
+REM 		32, 64 ou  ALL si vous souhaitez lancer les deux générations, 32 bits et 64 bits.
+REM
+REM 	Author : 						Thierry DECHAIZE
+REM		Date creation/modification : 	21/12/2023
+REM 	Reason of modifications : 	n° 1 - Blah Blah Blah ...
+REM 	 							n° 2 - Blah Blah Blah ...
+REM 	Version number :				1.1.1	          	(version majeure . version mineure . patch level)
+
+echo. Lancement du batch de generation d'une DLL et deux tests de celle-ci avec TDM GCC 32 bits ou 64 bits 
+REM     Affichage du nom du système d'exploitation Windows :              			Microsoft Windows 11 Famille (par exemple)
+REM 	Affichage de la version du système Windows :              					10.0.22621 (par exemple)
+REM 	Affichage de l'architecture du processeur supportant le système Windows :   64-bit (par exemple)    
+echo.  *********  Quelques caracteristiques du systeme hebergeant l'environnement de developpement.   ***********
+WMIC OS GET Name
+WMIC OS GET Version
+WMIC OS GET OSArchitecture
+
+REM 	Save of initial PATH on PATHINIT variable
+set PATHINIT=%PATH%
+echo.  **********      Pour cette generation le premier parametre vaut "%1" et le deuxieme "%2".     ************* 
+IF "%2" == "32" ( 
+   call :complink32 %1
+) ELSE (
+   IF "%2" == "64" (
+      call :complink64 %1	  
+   ) ELSE (
+      call :complink32 %1
+	  call :complink64 %1
+	)  
+)
+
+goto FIN
+
+:complink32
+echo.  ******************              Compilation de la DLL en mode 32 bits             *******************
+set "PAR1=%~1"
+REM Mandatory, add to PATH the binary directory of compiler TDM GCC 32 bits. You can adapt this directory at your personal software environment.
+SET PATH=C:\TDM-GCC-32\bin;C:\Outils\pexports-0.43\bin;%PATH%
+gcc --version | find "gcc"
+if "%PAR1%" == "TWO" (
+echo.  ***************************          Generation de la DLL en deux passes          *******************
+REM Options used with CLANG/LLVM compiler 64 bits (very similar with syntax of gcc compiler) :
+REM 	-Wall									-> set all warning during compilation
+REM		-c 										-> compile and assemble only, not call of linker
+REM 	-o dll_core64.obj 						-> output of object file indicated just after this option 
+REM 	-Dxxxxxx								-> define variable xxxxxx used by preprocessor of compiler CLANG C/C++
+REM 	-IC:\TDM-GCC-32\lib\clang\17\include -> set the include path directory (you can add many option -Ixxxxxxx to adapt your list of include path directories)  
+REM 				Remark 1 : You can replace option by  to "force" compilation or linkage to X64 architecture
+echo.  ***************       Compilation de la DLL avec TDM GCC 32 bits              *****************
+gcc -Wall -c -o dll_core.obj src\dll_core.c -DBUILD_DLL -D_WIN32 -DNDEBUG -IC:\TDM-GCC-32\include
+REM Options used with linker CLANG/LLVM 64 bits (very similar with syntax of gcc compiler) :
+REM 	-s 										-> "s[trip]", remove all symbol table and relocation information from the executable.
+REM		-shared									-> generate a shared library => on Window, generate a DLL (Dynamic Linked Library)
+REM 	-LC:\TDM-GCC-32\lib					-> -Lxxxxxxxxxx set library path directory to xxxxxxxxxxx (you can add many option -Ixxxxxxx to adapt your list of library path directories)  
+REM		-Wl,--output-def=dll_core.def  			-> set the output definition file, normal extension is xxxxx.def
+REM		-Wl,--out-implib=libdll_core.a 			-> set the output library file. On Window, you can choose library name beetween "normal name" (xxxxx.lib), or gnu library name (libxxxxx.a)
+REM		-Wl,--dll								-> -Wl,... set option ... to the linker, here determine subsystem to windows DLL
+REM 	-o dll_core.dll							-> output of executable file indicated just after this option, here relative name of DLL
+REM		-lkernel32 -luser32						-> -lxxxxxxxx set library used by linker to xxxxxxxxx
+echo.  ***************          Edition de liens de la DLL avec MSYS2  CLANG 32 bits        *******************
+gcc -s -shared -LC:\TDM-GCC-32\lib -LC:\TDM-GCC-32\lib -Wl,--output-def=dll_core.def -Wl,--out-implib=libdll_core.dll.a -Wl,--dll -o dll_core.dll -lkernel32 -luser32 dll_core.obj 
+echo.  ***************          Listage des symboles exportes dans le fichier de definition           *******************
+type dll_core.def
+echo.  ***************              Listage des fonctions exportees de la DLL              *******************
+REM  dump result of command "gendef" to stdout, here, with indirection of output, generate file dll_core_2.def
+pexports dll_core.dll
+echo.  ************     Generation et lancement du premier programme de test de la DLL en mode implicite.      *************
+gcc -c -DNDEBUG -D_WIN32 -o testdll_implicit.o src\testdll_implicit.c
+REM 	Options used by linker of CLANG/LLVM compiler
+REM 		-s 									-> Strip output file, here dll file.
+REM 		-L.									-> indicate library search path on current directory (presence of dll generatd just before)
+gcc -o testdll_implicit.exe -s testdll_implicit.o -L. dll_core.dll
+REM 	Run test program of DLL with implicit load
+testdll_implicit.exe
+echo.  ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
+gcc -c -DNDEBUG -D_WIN32 -o testdll_explicit.o src\testdll_explicit.c
+gcc -o testdll_explicit.exe -s testdll_explicit.o
+REM 	Run test program of DLL with explicit load
+testdll_explicit.exe						
+ ) ELSE (
+echo.  ***************************                Generation de la DLL en une passe                    *******************
+REM     Options used by GCC compiler 32 bits of MingW32 included in Winlibs
+REM 		-Dxxxxx	 					-> Define variable xxxxxx used by precompiler, here define to build dll with good prefix of functions exported (or imported)
+REM 		-shared						-> Set option to generate shared library .ie. on windows systems DLL
+REM 		-o xxxxx 					-> Define output file generated by GCC compiler, here dll file
+REM 		-Wl,xxxxxxxx				-> Set options to linker : here, first option to generate def file, second option to generate lib file 
+gcc -DBUILD_DLL -DNDEBUG -D_WIN32 -shared -o dll_core.dll -Wl,--output-def=dll_core.def -Wl,--out-implib,libdll_core.dll.a src\dll_core.c 
+echo.  ***************          Listage des symboles exportes dans le fichier de definition           *******************
+type dll_core.def
+REM    Show list of exported symbols from a dll 
+echo.  ************     				 Dump des sysboles exportes de la DLL dll_core.dll      				  *************
+pexports dll_core.dll
+echo.  ************     Generation et lancement du premier programme de test de la DLL en mode implicite.      *************
+gcc -DNDEBUG -D_WIN32 src\testdll_implicit.c -L. -o testdll_implicit.exe dll_core.dll
+REM 	Run test program of DLL with implicit load
+testdll_implicit.exe
+echo.  ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
+gcc -DNDEBUG src\testdll_explicit.c -o testdll_explicit.exe
+REM 	Run test program of DLL with explicit load
+testdll_explicit.exe
+)
+echo.  ****************               Lancement du script python 32 bits de test de la DLL.               ********************
+%PYTHON32% version.py
+REM 	Run test python script of DLL with explicit load
+%PYTHON32% testdll_cdecl.py dll_core.dll 
+REM 	Return in initial PATH
+set PATH=%PATHINIT%
+exit /B 
+
+:complink64
+echo.  ***************************          Compilation de la DLL en mode 64 bits        *******************
+set "PAR1=%~1"
+REM      Mandatory, add to PATH the binary directory of compiler CLANG 64 bits included in MSYS2. You can adapt this directory at your personal software environment.
+SET PATH=C:\TDM-GCC-64\bin;C:\Outils\pexports-0.43\bin;%PATH%
+gcc --version | find "gcc"
+if "%PAR1%" == "TWO" (
+echo.  ***************************          Generation de la DLL en deux passes          *******************
+REM Options used with CLANG/LLVM compiler 64 bits (very similar with syntax of gcc compiler) :
+REM 	-Wall									-> set all warning during compilation
+REM		-c 										-> compile and assemble only, not call of linker
+REM 	-o dll_core64.obj 								-> output of object file indicated just after this option 
+REM 	-Dxxxxxx								-> define variable xxxxxx used by preprocessor of compiler CLANG C/C++
+REM 	-IC:\TDM-GCC-32\lib\clang\17\include -> set the include path directory (you can add many option -Ixxxxxxx to adapt your list of include path directories)  
+REM 				Remark 1 : You can replace option  by to "force" compilation or linkage to X86 architecture
+echo.  ***************       Compilation de la DLL avec TDM GCC 64 bits                   *****************
+gcc -Wall -c -o dll_core64.obj src\dll_core.c -DBUILD_DLL -D_WIN32 -DNDEBUG  -IC:\TDM-GCC-64\include
+REM Options used with linker CLANG/LLVM 64 bits (very similar with syntax of gcc compiler) :
+REM 	-s 										-> "s[trip]", remove all symbol table and relocation information from the executable. 
+REM		-shared									-> generate a shared library => on Window, generate a DLL (Dynamic Linked Library)
+REM 	-LC:\TDM-GCC-64\lib					-> -Lxxxxxxxxxx set library path directory to xxxxxxxxxxx (you can add many option -Ixxxxxxx to adapt your list of library path directories)  
+REM		-Wl,--output-def=dll_core64.def  		-> set the output definition file, normal extension is xxxxx.def
+REM		-Wl,--out-implib=libdll_core64.dll.a-	-> set the output library file. On Window, you can choose library name beetween "normal name" (xxxxx.lib), or gnu library name (libxxxxx.a)
+REM		-Wl,--dll								-> -Wl,... set option ... to the linker, here determine subsystem to windows DLL
+REM		-lkernel32 -luser32						-> -lxxxxxxxx set library used by linker to xxxxxxxxx
+echo.  ***************          Edition de liens de la DLL avec TDM GCC 64 bits      *******************
+gcc -s -shared -LC:\TDM-GCC-64\lib -LC:\TDM-GCC-64\lib -Wl,--output-def=dll_core64.def -Wl,--out-implib=libdll_core64.dll.a -Wl,--dll -o dll_core64.dll  -lkernel32 -luser32 dll_core64.obj
+echo.  ***************          Listage des symboles exportes dans le fichier de definition           *******************
+type dll_core64.def
+echo.  ***************            Listage des fonctions exportees de la DLL dll_core64.dll            *******************
+REM  dump result of command "gendef" to stdout, here, with indirection of output ">", generate file dll_core64_2.def
+pexports dll_core64.dll
+echo.  ************     Generation et lancement du premier programme de test de la DLL en mode implicite.    *************
+gcc -c -DNDEBUG -D_WIN32 -o testdll_implicit64.o  src\testdll_implicit.c
+REM 	Options used by linker of CLANG/LLVM compiler
+REM 		-s 									-> Strip output file, here dll file.
+REM 		-L.									-> indicate library search path on current directory (presence of dll)
+gcc -o testdll_implicit64.exe -s testdll_implicit64.o  -L. dll_core64.dll
+REM 	Run test program of DLL with implicit load
+testdll_implicit64.exe
+echo.  ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.   ************
+gcc -c -DNDEBUG -D_WIN32  -o testdll_explicit64.o src\testdll_explicit.c
+gcc -o testdll_explicit64.exe  -s testdll_explicit64.o
+REM 	Run test program of DLL with explicit load
+testdll_explicit64.exe					
+ ) ELSE (
+echo.  ***************************                Generation de la DLL en une passe                    *******************
+REM     Options used by GCC compiler 64 bits of MingW64 included in Winlibs
+REM 		-Dxxxxx	 					-> Define variable xxxxxx used by precompiler, here define to build dll with good prefix of functions exported (or imported)
+REM 		-shared						-> Set option to generate shared library .ie. on windows systems DLL
+REM 		-o xxxxx 					-> Define output file generated by GCC compiler, here dll file
+REM		    -m64						-> set compilation and linkage to X64 Architecture (64 bits)
+REM 		-Wl,xxxxxxxx				-> Set options to linker : here, first option to generate def file, second option to generate lib file 
+gcc -DBUILD_DLL -DNDEBUG -D_WIN32 -shared -o dll_core64.dll  -Wl,--output-def=dll_core64.def -Wl,--out-implib,libdll_core64.dll.a src\dll_core.c
+echo.  ***************          Listage des symboles exportes dans le fichier de definition           *******************
+type dll_core64.def
+REM    Show list of exported symbols from a dll 
+echo.  ************     				 Dump des sysboles exportes de la DLL dll_core64.dll      		       *************
+pexports dll_core64.dll
+echo.  ************     Generation et lancement du premier programme de test de la DLL en mode implicite.      *************
+gcc -DNDEBUG -D_WIN32 src\testdll_implicit.c  -L. -o testdll_implicit64.exe dll_core64.dll
+REM 	Run test program of DLL with implicit load
+testdll_implicit64.exe
+echo.  ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
+gcc -DNDEBUG src\testdll_explicit.c  -o testdll_explicit64.exe
+REM 	Run test program of DLL with explicit load
+testdll_explicit64.exe
+)					
+echo.  ****************               Lancement du script python 64 bits de test de la DLL.               ********************
+%PYTHON64% version.py
+REM 	Run test python script of DLL with explicit load
+%PYTHON64% testdll_cdecl.py dll_core64.dll
+REM 	Return in initial PATH
+set PATH=%PATHINIT%
+exit /B 
+
+:FIN
+echo.              Fin de la generation de la DLL et des tests avec TDM GCC 32 bits ou 64 bits
+
+Le script python de test de la DLL est le suivant
+
+"testdll_cdecl.py" :
+
+# **************************************     File : testdll_cdecl.py     ******************************
+#testdll_cdecl.py
+import ctypes, ctypes.util
+import os
+import sys
+
+if len( sys.argv ) == 1:
+    print( "testdll_cdecl.py script wrote by Thierry DECHAIZE, thierry.dechaize@gmail.com" )
+    print( "\tusage: python test_add_cdecl.py Name_of_Dll." )
+    exit()
+
+cwd = os.getcwd()
+dll_name = cwd + '\\' + sys.argv[1]
+mydll_path = ctypes.util.find_library(dll_name)
+if not mydll_path:
+    print("Unable to find the specified DLL.")
+    sys.exit()
+  
+#mydll = ctypes.WinDLL(dll_name)          # load the dll __stdcall  
+try:    
+    mydll = ctypes.CDLL(dll_name)      # load the dll __cdecl
+except OSError:
+    print(f"Unable to load the specified DLL : {sys.argv[1]}.")
+    sys.exit()
+    
+# test mandatory in case of Borland generation, the export function is decorated by "_" prefix  => call _Add
+if 'BC55' in sys.argv[1]  or 'PELLESC64' in sys.argv[1] or 'OW32' in sys.argv[1]: 
+#   mydll._Hello(None)
+    print(f"----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------");
+    mydll._Addint.argtypes = [ctypes.c_int, ctypes.c_int]
+    print(f"La somme de 42 plus 7 vaut {mydll._Addint(42, 7)}. (from script python {sys.argv[0]})")
+    mydll._Subint.argtypes = [ctypes.c_int, ctypes.c_int]
+    print(f"La difference de 42 moins 7 vaut {mydll._Subint(42, 7)}. (from script python {sys.argv[0]})")
+    mydll._Multint.argtypes = [ctypes.c_int, ctypes.c_int]
+    print(f"La multiplication de 42 par 7 vaut {mydll._Multint(42, 7)}. (from script python {sys.argv[0]})")
+    mydll._Divint.argtypes = [ctypes.c_int, ctypes.c_int]
+    mydll._Divint.restype = ctypes.c_int
+    result = mydll._Divint(42,7)
+    print(f"La division de 42 par 7 vaut {result}.                 (from script python {sys.argv[0]})")
+    mydll.Squareint.argtypes = [ctypes.c_int]
+    print(f"Le carre de 7 par 7 vaut {mydll._Squarint(7)}. (from script python {sys.argv[0]})")
+    print(f"----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------");
+    mydll._Adddbl.argtypes = [ctypes.c_double, ctypes.c_double]
+    mydll._Adddbl.restype = ctypes.c_double
+    print(f"La somme de 16.9 plus 7.3 vaut {mydll._Adddbl(16.9, 7.3)}. (from script python {sys.argv[0]})")
+    mydll._Subdbl.argtypes = [ctypes.c_double, ctypes.c_double]
+    mydll._Subdbl.restype = ctypes.c_double
+    print(f"La difference de 16.9 moins 7.3 vaut {mydll._Subdbl(16.9, 7.3)}. (from script python {sys.argv[0]})")
+    mydll._Multdbl.argtypes = [ctypes.c_double, ctypes.c_double]
+    mydll._Multdbl.restype = ctypes.c_double
+    print(f"La multiplication de 16.9 par 7.3 vaut {mydll._Multdbl(16.9, 7.3)}. (from script python {sys.argv[0]})")
+    mydll._Divdbl.argtypes = [ctypes.c_double, ctypes.c_double]
+    mydll._Divdbl.restype = ctypes.c_double
+    print(f"La division de 16.9 par 7.3 vaut {"{0:g}".format(mydll._Divdbl(16.9, 7.3))}.             (from script python {sys.argv[0]})")
+    mydll._Squardbl.argtypes = [ctypes.c_double]
+    mydll._Squardbl.restype = ctypes.c_double
+    print(f"Le carre de 7.3 par 7.3 vaut {mydll._Squardbl(7.3)}. (from script python {sys.argv[0]})")
+else:
+    mydll.Hello(None)
+    print(f"----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------");
+    mydll.Addint.argtypes = [ctypes.c_int, ctypes.c_int]
+    mydll.Addint.restype = ctypes.c_int
+    result = mydll.Addint(42,7)
+    print(f"La somme de 42 plus 7 vaut {result}.                  (from script python {sys.argv[0]})")
+    mydll.Subint.argtypes = [ctypes.c_int, ctypes.c_int]
+    mydll.Subint.restype = ctypes.c_int
+    result = mydll.Subint(42,7)
+    print(f"La difference de 42 moins 7 vaut {result}.            (from script python {sys.argv[0]})")
+    mydll.Multint.argtypes = [ctypes.c_int, ctypes.c_int]
+    mydll.Multint.restype = ctypes.c_int
+    result = mydll.Multint(42,7)
+    print(f"La multiplication de 42 par 7 vaut {result}.         (from script python {sys.argv[0]})")
+    mydll.Divint.argtypes = [ctypes.c_int, ctypes.c_int]
+    mydll.Divint.restype = ctypes.c_int
+    result = mydll.Divint(42,7)
+    print(f"La division de 42 par 7 vaut {result}.                 (from script python {sys.argv[0]})")
+    mydll.Squarint.argtypes = [ctypes.c_int]
+    mydll.Squarint.restype = ctypes.c_int
+    result = mydll.Squarint(7)
+    print(f"Le carre de 7 par 7 vaut {result}.                    (from script python {sys.argv[0]})")
+    print(f"----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------");
+    mydll.Adddbl.argtypes = [ctypes.c_double, ctypes.c_double]
+    mydll.Adddbl.restype = ctypes.c_double
+    print(f"La somme de 16.9 plus 7.3 vaut {mydll.Adddbl(16.9, 7.3)}.                  (from script python {sys.argv[0]})")
+    mydll.Subdbl.argtypes = [ctypes.c_double, ctypes.c_double]
+    mydll.Subdbl.restype = ctypes.c_double
+    print(f"La difference de 16.9 moins 7.3 vaut {"{0:g}".format(mydll.Subdbl(16.9, 7.3))}.             (from script python {sys.argv[0]})")
+    mydll.Multdbl.argtypes = [ctypes.c_double, ctypes.c_double]
+    mydll.Multdbl.restype = ctypes.c_double
+    print(f"La multiplication de 16.9 par 7.3 vaut {"{0:g}".format(mydll.Multdbl(16.9, 7.3))}.        (from script python {sys.argv[0]})")
+    mydll.Divdbl.argtypes = [ctypes.c_double, ctypes.c_double]
+    mydll.Divdbl.restype = ctypes.c_double
+    print(f"La division de 16.9 par 7.3 vaut {"{0:g}".format(mydll.Divdbl(16.9, 7.3))}.             (from script python {sys.argv[0]})")
+    mydll.Squardbl.argtypes = [ctypes.c_double]
+    mydll.Squardbl.restype = ctypes.c_double
+    print(f"Le carre de 7.3 par 7.3 vaut {"{0:g}".format(mydll.Squardbl(7.3))}.                   (from script python {sys.argv[0]})")
+# **************************************      End file : testdll_cdecl.py      ******************************
+
+Et voici le résultat (très positif) de ce test en paramétrant les deux générations d'abord en une puis en deux passes :
+
+"compile_link_dll_TDM_GCC_OK.bat ONE ALL"
+ Lancement du batch de generation d'une DLL et deux tests de celle-ci avec TDM GCC 32 bits ou 64 bits
+  *********  Quelques caracteristiques du systeme hebergeant l'environnement de developpement.   ***********
+Name
+Microsoft Windows 11 Famille|C:\WINDOWS|\Device\Harddisk1\Partition3
+
+Version
+10.0.22631
+
+OSArchitecture
+64-bit
+
+  **********      Pour cette generation le premier parametre vaut "ONE" et le deuxieme "ALL".     *************
+  ******************              Compilation de la DLL en mode 32 bits             *******************
+gcc (tdm-1) 10.3.0
+  ***************************                Generation de la DLL en une passe                    *******************
+  ***************          Listage des symboles exportes dans le fichier de definition           *******************
+EXPORTS
+    Adddbl @1
+    Addint @2
+    Divdbl @3
+    Divint @4
+    Hello @5
+    Multdbl @6
+    Multint @7
+    Squardbl @8
+    Squarint @9
+    Subdbl @10
+    Subint @11
+  ************                                   Dump des sysboles exportes de la DLL dll_core.dll                                        *************
+LIBRARY dll_core.dll
+EXPORTS
+Adddbl
+Addint
+Divdbl
+Divint
+Hello
+Multdbl
+Multint
+Squardbl
+Squarint
+Subdbl
+Subint
+  ************     Generation et lancement du premier programme de test de la DLL en mode implicite.      *************
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+Le resultat de l'addition de 42 plus 7 vaut : 49.        (from application with implicit load of DLL testdll_implicit.exe)
+Le resultat de la soustraction de 42 moins 7 vaut : 35.  (from application with implicit load of DLL testdll_implicit.exe)
+Le resultat de la multiplication de 42 par 7 vaut : 294. (from application with implicit load of DLL testdll_implicit.exe)
+Le resultat de la division de 42 par 7 vaut : 6.         (from application with implicit load of DLL testdll_implicit.exe)
+Le carre de 7 par 7 vaut : 49.                           (from application with implicit load of DLL testdll_implicit.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with implicit load of DLL testdll_implicit.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with implicit load of DLL testdll_implicit.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with implicit load of DLL testdll_implicit.exe)
+La division de 16.9 par 7.3 vaut 2.315.        (from application with implicit load of DLL testdll_implicit.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with implicit load of DLL testdll_implicit.exe)
+DLL detaching from process...
+  ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.          (from application with explicit load of DLL testdll_explicit.exe)
+La soustraction de 42 moins 7 vaut 35.  (from application with explicit load of DLL testdll_explicit.exe)
+La multiplication de 42 par 7 vaut 294. (from application with explicit load of DLL testdll_explicit.exe)
+La division de 42 par 7 vaut 6.         (from application with explicit load of DLL testdll_explicit.exe)
+Le carre de 7 par 7 vaut 49.            (from application with explicit load of DLL testdll_explicit.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with explicit load of DLL testdll_explicit.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with explicit load of DLL testdll_explicit.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with explicit load of DLL testdll_explicit.exe)
+La division de 16.9 par 7.3 vaut 2.315.        (from application with explicit load of DLL testdll_explicit.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with explicit load of DLL testdll_explicit.exe)
+DLL detaching from process...
+  ****************               Lancement du script python 32 bits de test de la DLL.               ********************
+Version python : 3.12 (32bit)
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.                  (from script python testdll_cdecl.py)
+La difference de 42 moins 7 vaut 35.            (from script python testdll_cdecl.py)
+La multiplication de 42 par 7 vaut 294.         (from script python testdll_cdecl.py)
+La division de 42 par 7 vaut 6.                 (from script python testdll_cdecl.py)
+Le carre de 7 par 7 vaut 49.                    (from script python testdll_cdecl.py)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.2.                  (from script python testdll_cdecl.py)
+La difference de 16.9 moins 7.3 vaut 9.6.             (from script python testdll_cdecl.py)
+La multiplication de 16.9 par 7.3 vaut 123.37.        (from script python testdll_cdecl.py)
+La division de 16.9 par 7.3 vaut 2.31507.             (from script python testdll_cdecl.py)
+Le carre de 7.3 par 7.3 vaut 53.29.                   (from script python testdll_cdecl.py)
+DLL detaching from process...
+  ***************************          Compilation de la DLL en mode 64 bits        *******************
+gcc (tdm64-1) 10.3.0
+  ***************************                Generation de la DLL en une passe                    *******************
+  ***************          Listage des symboles exportes dans le fichier de definition           *******************
+EXPORTS
+    Adddbl @1
+    Addint @2
+    Divdbl @3
+    Divint @4
+    Hello @5
+    Multdbl @6
+    Multint @7
+    Squardbl @8
+    Squarint @9
+    Subdbl @10
+    Subint @11
+  ************                                   Dump des sysboles exportes de la DLL dll_core64.dll                           *************
+  ************     Generation et lancement du premier programme de test de la DLL en mode implicite.      *************
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+Le resultat de l'addition de 42 plus 7 vaut : 49.        (from application with implicit load of DLL testdll_implicit64.exe)
+Le resultat de la soustraction de 42 moins 7 vaut : 35.  (from application with implicit load of DLL testdll_implicit64.exe)
+Le resultat de la multiplication de 42 par 7 vaut : 294. (from application with implicit load of DLL testdll_implicit64.exe)
+Le resultat de la division de 42 par 7 vaut : 6.         (from application with implicit load of DLL testdll_implicit64.exe)
+Le carre de 7 par 7 vaut : 49.                           (from application with implicit load of DLL testdll_implicit64.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with implicit load of DLL testdll_implicit64.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with implicit load of DLL testdll_implicit64.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with implicit load of DLL testdll_implicit64.exe)
+La division de 16.9 par 7.3 vaut 2.315.        (from application with implicit load of DLL testdll_implicit64.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with implicit load of DLL testdll_implicit64.exe)
+DLL detaching from process...
+  ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.          (from application with explicit load of DLL testdll_explicit64.exe)
+La soustraction de 42 moins 7 vaut 35.  (from application with explicit load of DLL testdll_explicit64.exe)
+La multiplication de 42 par 7 vaut 294. (from application with explicit load of DLL testdll_explicit64.exe)
+La division de 42 par 7 vaut 6.         (from application with explicit load of DLL testdll_explicit64.exe)
+Le carre de 7 par 7 vaut 49.            (from application with explicit load of DLL testdll_explicit64.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with explicit load of DLL testdll_explicit64.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with explicit load of DLL testdll_explicit64.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with explicit load of DLL testdll_explicit64.exe)
+La division de 16.9 par 7.3 vaut 2.315.        (from application with explicit load of DLL testdll_explicit64.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with explicit load of DLL testdll_explicit64.exe)
+DLL detaching from process...
+  ****************               Lancement du script python 64 bits de test de la DLL.               ********************
+Version python : 3.12 (64bit)
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.                  (from script python testdll_cdecl.py)
+La difference de 42 moins 7 vaut 35.            (from script python testdll_cdecl.py)
+La multiplication de 42 par 7 vaut 294.         (from script python testdll_cdecl.py)
+La division de 42 par 7 vaut 6.                 (from script python testdll_cdecl.py)
+Le carre de 7 par 7 vaut 49.                    (from script python testdll_cdecl.py)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.2.                  (from script python testdll_cdecl.py)
+La difference de 16.9 moins 7.3 vaut 9.6.             (from script python testdll_cdecl.py)
+La multiplication de 16.9 par 7.3 vaut 123.37.        (from script python testdll_cdecl.py)
+La division de 16.9 par 7.3 vaut 2.31507.             (from script python testdll_cdecl.py)
+Le carre de 7.3 par 7.3 vaut 53.29.                   (from script python testdll_cdecl.py)
+DLL detaching from process...
+              Fin de la generation de la DLL et des tests avec TDM GCC 32 bits ou 64 bits
+
+Le résultat produit en deux passes :
+
+"compile_link_dll_TDM_GCC_OK.bat TWO ALL"
+ Lancement du batch de generation d'une DLL et deux tests de celle-ci avec TDM GCC 32 bits ou 64 bits
+  *********  Quelques caracteristiques du systeme hebergeant l'environnement de developpement.   ***********
+Name
+Microsoft Windows 11 Famille|C:\WINDOWS|\Device\Harddisk1\Partition3
+
+Version
+10.0.22631
+
+OSArchitecture
+64-bit
+
+  **********      Pour cette generation le premier parametre vaut "TWO" et le deuxieme "ALL".     *************
+  ******************              Compilation de la DLL en mode 32 bits             *******************
+gcc (tdm-1) 10.3.0
+  ***************************          Generation de la DLL en deux passes          *******************
+  ***************       Compilation de la DLL avec TDM GCC 32 bits              *****************
+  ***************          Edition de liens de la DLL avec MSYS2  CLANG 32 bits        *******************
+  ***************          Listage des symboles exportes dans le fichier de definition           *******************
+EXPORTS
+    Adddbl @1
+    Addint @2
+    Divdbl @3
+    Divint @4
+    Hello @5
+    Multdbl @6
+    Multint @7
+    Squardbl @8
+    Squarint @9
+    Subdbl @10
+    Subint @11
+  ***************              Listage des fonctions exportees de la DLL              *******************
+LIBRARY dll_core.dll
+EXPORTS
+Adddbl
+Addint
+Divdbl
+Divint
+Hello
+Multdbl
+Multint
+Squardbl
+Squarint
+Subdbl
+Subint
+  ************     Generation et lancement du premier programme de test de la DLL en mode implicite.      *************
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+Le resultat de l'addition de 42 plus 7 vaut : 49.        (from application with implicit load of DLL testdll_implicit.exe)
+Le resultat de la soustraction de 42 moins 7 vaut : 35.  (from application with implicit load of DLL testdll_implicit.exe)
+Le resultat de la multiplication de 42 par 7 vaut : 294. (from application with implicit load of DLL testdll_implicit.exe)
+Le resultat de la division de 42 par 7 vaut : 6.         (from application with implicit load of DLL testdll_implicit.exe)
+Le carre de 7 par 7 vaut : 49.                           (from application with implicit load of DLL testdll_implicit.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with implicit load of DLL testdll_implicit.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with implicit load of DLL testdll_implicit.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with implicit load of DLL testdll_implicit.exe)
+La division de 16.9 par 7.3 vaut 2.315.        (from application with implicit load of DLL testdll_implicit.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with implicit load of DLL testdll_implicit.exe)
+DLL detaching from process...
+  ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.          (from application with explicit load of DLL testdll_explicit.exe)
+La soustraction de 42 moins 7 vaut 35.  (from application with explicit load of DLL testdll_explicit.exe)
+La multiplication de 42 par 7 vaut 294. (from application with explicit load of DLL testdll_explicit.exe)
+La division de 42 par 7 vaut 6.         (from application with explicit load of DLL testdll_explicit.exe)
+Le carre de 7 par 7 vaut 49.            (from application with explicit load of DLL testdll_explicit.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with explicit load of DLL testdll_explicit.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with explicit load of DLL testdll_explicit.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with explicit load of DLL testdll_explicit.exe)
+La division de 16.9 par 7.3 vaut 2.315.        (from application with explicit load of DLL testdll_explicit.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with explicit load of DLL testdll_explicit.exe)
+DLL detaching from process...
+  ****************               Lancement du script python 32 bits de test de la DLL.               ********************
+Version python : 3.12 (32bit)
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.                  (from script python testdll_cdecl.py)
+La difference de 42 moins 7 vaut 35.            (from script python testdll_cdecl.py)
+La multiplication de 42 par 7 vaut 294.         (from script python testdll_cdecl.py)
+La division de 42 par 7 vaut 6.                 (from script python testdll_cdecl.py)
+Le carre de 7 par 7 vaut 49.                    (from script python testdll_cdecl.py)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.2.                  (from script python testdll_cdecl.py)
+La difference de 16.9 moins 7.3 vaut 9.6.             (from script python testdll_cdecl.py)
+La multiplication de 16.9 par 7.3 vaut 123.37.        (from script python testdll_cdecl.py)
+La division de 16.9 par 7.3 vaut 2.31507.             (from script python testdll_cdecl.py)
+Le carre de 7.3 par 7.3 vaut 53.29.                   (from script python testdll_cdecl.py)
+DLL detaching from process...
+  ***************************          Compilation de la DLL en mode 64 bits        *******************
+gcc (tdm64-1) 10.3.0
+  ***************************          Generation de la DLL en deux passes          *******************
+  ***************       Compilation de la DLL avec TDM GCC 64 bits                   *****************
+  ***************          Edition de liens de la DLL avec TDM GCC 64 bits      *******************
+  ***************          Listage des symboles exportes dans le fichier de definition           *******************
+EXPORTS
+    Adddbl @1
+    Addint @2
+    Divdbl @3
+    Divint @4
+    Hello @5
+    Multdbl @6
+    Multint @7
+    Squardbl @8
+    Squarint @9
+    Subdbl @10
+    Subint @11
+  ***************            Listage des fonctions exportees de la DLL dll_core64.dll            *******************
+  ************     Generation et lancement du premier programme de test de la DLL en mode implicite.    *************
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+Le resultat de l'addition de 42 plus 7 vaut : 49.        (from application with implicit load of DLL testdll_implicit64.exe)
+Le resultat de la soustraction de 42 moins 7 vaut : 35.  (from application with implicit load of DLL testdll_implicit64.exe)
+Le resultat de la multiplication de 42 par 7 vaut : 294. (from application with implicit load of DLL testdll_implicit64.exe)
+Le resultat de la division de 42 par 7 vaut : 6.         (from application with implicit load of DLL testdll_implicit64.exe)
+Le carre de 7 par 7 vaut : 49.                           (from application with implicit load of DLL testdll_implicit64.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with implicit load of DLL testdll_implicit64.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with implicit load of DLL testdll_implicit64.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with implicit load of DLL testdll_implicit64.exe)
+La division de 16.9 par 7.3 vaut 2.315.        (from application with implicit load of DLL testdll_implicit64.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with implicit load of DLL testdll_implicit64.exe)
+DLL detaching from process...
+  ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.   ************
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.          (from application with explicit load of DLL testdll_explicit64.exe)
+La soustraction de 42 moins 7 vaut 35.  (from application with explicit load of DLL testdll_explicit64.exe)
+La multiplication de 42 par 7 vaut 294. (from application with explicit load of DLL testdll_explicit64.exe)
+La division de 42 par 7 vaut 6.         (from application with explicit load of DLL testdll_explicit64.exe)
+Le carre de 7 par 7 vaut 49.            (from application with explicit load of DLL testdll_explicit64.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with explicit load of DLL testdll_explicit64.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with explicit load of DLL testdll_explicit64.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with explicit load of DLL testdll_explicit64.exe)
+La division de 16.9 par 7.3 vaut 2.315.        (from application with explicit load of DLL testdll_explicit64.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with explicit load of DLL testdll_explicit64.exe)
+DLL detaching from process...
+  ****************               Lancement du script python 64 bits de test de la DLL.               ********************
+Version python : 3.12 (64bit)
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.                  (from script python testdll_cdecl.py)
+La difference de 42 moins 7 vaut 35.            (from script python testdll_cdecl.py)
+La multiplication de 42 par 7 vaut 294.         (from script python testdll_cdecl.py)
+La division de 42 par 7 vaut 6.                 (from script python testdll_cdecl.py)
+Le carre de 7 par 7 vaut 49.                    (from script python testdll_cdecl.py)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.2.                  (from script python testdll_cdecl.py)
+La difference de 16.9 moins 7.3 vaut 9.6.             (from script python testdll_cdecl.py)
+La multiplication de 16.9 par 7.3 vaut 123.37.        (from script python testdll_cdecl.py)
+La division de 16.9 par 7.3 vaut 2.31507.             (from script python testdll_cdecl.py)
+Le carre de 7.3 par 7.3 vaut 53.29.                   (from script python testdll_cdecl.py)
+DLL detaching from process...
+              Fin de la generation de la DLL et des tests avec TDM GCC 32 bits ou 64 bits
+
+Il n'y a qu'un seul hic : l'outil PEXPORTS n'arrive pas à extraire les symboles des DLL générées en version 64 bits.
+Bug or Feature ?
+Mais, pour le reste, tout se déroule exactement comme prévu, sans accroc.
+
+Avec ces très bons résultats, je m'arrête ici pour ce bilan qui devait aller au bout des tests avec des DLL générées par 
+les compilateurs GCC version 10.3.0 de TDM (32 bits et 64 bits). 
+
+Conclusion :
+
+Il est donc confirmé qu'il est tout à fait possible de générer une DLL opérationnelle sous Windows 11 version 64 bits,
+avec beaucoup de facilité, aussi bien en version X86 qu'en version X64 avec le compilateur GCC de TDM, en adéquation 
+avec d'autres dérivations du compilateur GCC (CYGWIN64, MINGW, MINGW32 et MINGW64, MSYS2, ...).
+
+Voici les grandes lignes à retenir pour obtenir ce résultat :
+
+	a) Si vous utilisez dans le code principal de la DLL le point d'entrée DllMain, il faut le préfixer juste par "WINAPI". 
+		Pas d'autres options à rajouter, ni à déclarer. GCC respecte les indications de Microsoft pour l'appel à ce point 
+		d'entrée.
+	b) Pour toutes les fonctions déclarées comme accessibles dans votre DLL, il faut les préfixer par "__declspec(dllexport)" 
+	    ou par "__declspec(dllimport)" dans un fichier d'include qui est alors partagé entre la génération de la DLL et son 
+		utilisation dans le programme de test avec chargement implicite (astuce et préconisation de Mark Payne, sur la base d'un
+		test sur un Define "BUILD_DLL").
+	c) Dans le fichier principal de votre DLL, il faut, après avoir inclus le fichier d'include précédent, il faut déclarer
+	    le corps de chaque fonction en les préfixant par "__declspec(dllexport)" ou la variable symbolique "ad hoc", ce qui se 
+		fait automatiquement avec le fichier d'include et le test sur "BUILD_DLL".
+
+Enfin, nous avons constater que l'appel de la DLlMain est parfaitement restitué lors du chargement puis du déchargement de 
+la DLL, aussi bien pour le test avec chargement implicite que le test avec chargement explicite de la DLL, et bien entendu,
+pour le script python de test. On le voit avec les traces "DLL attaching to process..." et "DLL detaching from process...".
